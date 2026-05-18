@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Confirmation de lecture — Veille CFA</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%231a6b3c'/><text x='16' y='23' text-anchor='middle' font-size='16' fill='white' font-family='Georgia,serif' font-weight='bold'>V</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Outfit',sans-serif;background:#f0f0ed;color:#0f0f0e;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:#fff;border-radius:16px;padding:40px 36px;max-width:480px;width:100%;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.1);border:.5px solid rgba(0,0,0,.07)}
+.logo{width:52px;height:52px;border-radius:12px;background:linear-gradient(135deg,#1a6b3c,#2e8c52);display:flex;align-items:center;justify-content:center;font-family:Georgia,serif;font-weight:700;color:#fff;font-size:24px;margin:0 auto 20px}
+.state-icon{font-size:60px;line-height:1;margin-bottom:16px;display:block}
+h1{font-size:20px;font-weight:700;margin-bottom:8px}
+p{font-size:13px;color:#5a5a58;line-height:1.6;margin-bottom:6px}
+.titre-box{background:#eaf3de;border:.5px solid #97c459;border-radius:9px;padding:12px 16px;margin:18px 0;text-align:left}
+.titre-box .label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#27500a;margin-bottom:4px}
+.titre-box .titre{font-size:13px;font-weight:600;color:#0f0f0e;line-height:1.4}
+.info{font-size:10px;color:#b0b0ae;margin-top:20px;padding-top:16px;border-top:.5px solid #f0f0ed}
+.spinner{width:44px;height:44px;border:3px solid #eaf3de;border-top-color:#1a6b3c;border-radius:50%;animation:spin .8s linear infinite;margin:20px auto}
+@keyframes spin{to{transform:rotate(360deg)}}
+.already{background:#e8effe;border:.5px solid #7ba7ef;border-radius:9px;padding:10px 14px;font-size:11px;color:#162e6a;margin-top:16px;text-align:left;display:none}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">V</div>
+
+  <!-- État : chargement -->
+  <div id="state-loading">
+    <div class="spinner"></div>
+    <p>Enregistrement de votre confirmation…</p>
+  </div>
+
+  <!-- État : succès -->
+  <div id="state-ok" style="display:none">
+    <span class="state-icon">✅</span>
+    <h1>Lecture confirmée</h1>
+    <p>Merci, votre confirmation a bien été enregistrée.<br>L'expéditeur en a été notifié.</p>
+    <div class="titre-box">
+      <div class="label">Veille concernée</div>
+      <div class="titre" id="ok-titre">—</div>
+    </div>
+    <div class="already" id="already-msg">
+      <strong>Note :</strong> Vous aviez déjà confirmé la lecture de cette veille précédemment.
+    </div>
+    <div class="info">EPLEFPA Saint-Lô Thère · Veille réglementaire CFA<br>Cette confirmation est horodatée et enregistrée pour traçabilité.</div>
+  </div>
+
+  <!-- État : erreur token invalide -->
+  <div id="state-err" style="display:none">
+    <span class="state-icon">❌</span>
+    <h1>Lien invalide</h1>
+    <p>Ce lien de confirmation est invalide ou a expiré.<br>Contactez l'expéditeur si vous pensez qu'il s'agit d'une erreur.</p>
+    <div class="info">EPLEFPA Saint-Lô Thère · Veille réglementaire CFA</div>
+  </div>
+</div>
+
+<script>
+if (!firebase.apps.length) firebase.initializeApp({
+  apiKey:            'AIzaSyCihBi6Ob5-cVpSOCW-a41YbvMrdeC8Q4E',
+  authDomain:        'ep-cfa-stlo-there.firebaseapp.com',
+  projectId:         'ep-cfa-stlo-there',
+  storageBucket:     'ep-cfa-stlo-there.firebasestorage.app',
+  messagingSenderId: '97376545571',
+  appId:             '1:97376545571:web:0c32b526b6e9ccf6e7ba96'
+});
+const db = firebase.firestore();
+
+async function confirmAck() {
+  // Lire le token dans l'URL
+  const params = new URLSearchParams(window.location.search);
+  const token  = params.get('t');
+
+  if (!token) { showErr(); return; }
+
+  try {
+    const ackRef = db.collection('veille_acks').doc(token);
+    const ackDoc = await ackRef.get();
+
+    if (!ackDoc.exists) { showErr(); return; }
+
+    const data = ackDoc.data();
+    const alreadyLu = data.lu === true;
+
+    // Afficher le titre
+    document.getElementById('ok-titre').textContent = data.itemTitre || '—';
+
+    if (alreadyLu) {
+      // Déjà lu : afficher message mais ne pas re-notifier
+      document.getElementById('already-msg').style.display = 'block';
+      showOk();
+      return;
+    }
+
+    // Marquer comme lu dans veille_acks
+    const now = Date.now();
+    await ackRef.update({ lu: true, luAt: now });
+
+    // Mettre à jour dans veille_envois (chercher par tokenId)
+    const envoiSnap = await db.collection('veille_envois')
+      .where('tokenId', '==', token).limit(1).get();
+
+    if (!envoiSnap.empty) {
+      await envoiSnap.docs[0].ref.update({ lu: true, luAt: now });
+    }
+
+    // Logguer dans veille_actions pour traçabilité Qualiopi
+    await db.collection('veille_actions').add({
+      itemId:     data.itemId || '',
+      itemTitre:  (data.itemTitre || '').slice(0, 120),
+      type:       'Accusé de réception',
+      note:       data.toEmail + ' — J\'ai lu confirmé',
+      ts:         now,
+      date:       new Date(now).toLocaleDateString('fr-FR'),
+    });
+
+    showOk();
+
+  } catch(e) {
+    console.error(e);
+    showErr();
+  }
+}
+
+function showOk()  { document.getElementById('state-loading').style.display='none'; document.getElementById('state-ok').style.display='block'; }
+function showErr() { document.getElementById('state-loading').style.display='none'; document.getElementById('state-err').style.display='block'; }
+
+confirmAck();
+</script>
+</body>
+</html>
